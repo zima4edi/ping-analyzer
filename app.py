@@ -1,3 +1,4 @@
+import os
 import re
 from datetime import datetime, timedelta, timezone
 import numpy as np
@@ -9,8 +10,24 @@ st.set_page_config(page_title="Ping Log Analyzer", layout="wide")
 
 tz_utc8 = timezone(timedelta(hours=8))
 
-# Check if Embed Mode is active via URL query param (?embed=true)
+# Check if URL parameter ?embed=true is active
 is_embedded = st.query_params.get("embed", "false").lower() == "true"
+
+if is_embedded:
+    st.markdown("""
+        <style>
+            #MainMenu {visibility: hidden;}
+            header {visibility: hidden;}
+            footer {visibility: hidden;}
+            .block-container {
+                padding-top: 0.5rem !important;
+                padding-bottom: 0rem !important;
+                padding-left: 1rem !important;
+                padding-right: 1rem !important;
+            }
+        </style>
+    """, unsafe_allow_html=True)
+
 
 def parse_log(raw_text):
     parsed_records = []
@@ -61,35 +78,30 @@ def parse_log(raw_text):
     return df
 
 
-# -------------------------------------------------------------------
-# HIDE CONTROLS IN EMBED MODE
-# -------------------------------------------------------------------
+# 1. Determine Data Source
+raw_data = None
+
 if not is_embedded:
     st.title("Ping Log Analyzer")
     uploaded_file = st.file_uploader("1. Upload Ping Log File", type=["txt", "log"])
+    if uploaded_file is not None:
+        raw_data = uploaded_file.getvalue().decode("utf-8", errors="ignore")
 else:
-    # Optional: Hide top header padding and footer via CSS when embedded
-    st.markdown("""
-        <style>
-            #MainMenu {visibility: hidden;}
-            header {visibility: hidden;}
-            footer {visibility: hidden;}
-            .block-container {padding-top: 1rem;}
-        </style>
-    """, unsafe_allow_html=True)
     uploaded_file = None
 
-# Store dataframe in Session State so it persists across views
-if uploaded_file is not None:
-    raw_data = uploaded_file.getvalue().decode("utf-8", errors="ignore")
-    st.session_state['parsed_df'] = parse_log(raw_data)
+# Fallback to repository file 'colab_t1.txt' if no manual file is uploaded
+DEFAULT_FILE = "colab_t1.txt"
 
-# Render Plot if parsed data exists
-if 'parsed_df' in st.session_state and not st.session_state['parsed_df'].empty:
-    df_parsed = st.session_state['parsed_df']
+if raw_data is None and os.path.exists(DEFAULT_FILE):
+    with open(DEFAULT_FILE, "r", encoding="utf-8", errors="ignore") as f:
+        raw_data = f.read()
+
+# 2. Parse and Plot Data
+if raw_data:
+    df_parsed = parse_log(raw_data)
     unique_hosts = list(dict.fromkeys(df_parsed['target'].dropna()))
 
-    # Render control UI only when NOT in embed mode
+    # Render controls ONLY if NOT embedded
     if not is_embedded:
         st.success(f"File loaded! {len(df_parsed)} records parsed.")
         col1, col2, col3 = st.columns([2, 1, 1])
@@ -100,12 +112,12 @@ if 'parsed_df' in st.session_state and not st.session_state['parsed_df'].empty:
         with col3:
             interval_selected = st.selectbox("Interval (min):", [1, 2, 3, 5], index=1)
     else:
-        # Default embed settings
+        # Default view options when embedded
         selected_hosts = ['ALL (All Hosts)']
         hours_selected = 2
         interval_selected = 2
 
-    # Filtering & Plotting logic
+    # Filter & Render Chart
     max_time = df_parsed['timestamp'].max()
     cutoff_time = max_time - timedelta(hours=hours_selected)
     df_filtered = df_parsed[df_parsed['timestamp'] >= cutoff_time].copy()
@@ -154,7 +166,6 @@ if 'parsed_df' in st.session_state and not st.session_state['parsed_df'].empty:
             margin=dict(l=40, r=40, t=50, b=40)
         )
 
-        # Displays ONLY the interactive plot
         st.plotly_chart(fig, use_container_width=True)
 elif is_embedded:
-    st.info("No data available to display in view-only mode.")
+    st.info("No 'colab_t1.txt' file found in repository to display in view-only mode.")
